@@ -1,83 +1,114 @@
-import React, { FC, useState, useCallback } from 'react';
+import React, { FC, useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useManifest, useTrader, useProduct } from 'contexts/DexterityProviders';
-import { notify } from '../../utils/notifications';
 import { PublicKey } from '@solana/web3.js';
-import { dexterity } from 'utils/dexterityTypes';
+import { notify } from "../../utils/notifications";
+import { formatPubKey, handleCopy } from 'utils/util';
+import Button from '../Button';
+import { dexterity, TraderAccount, TraderAccountDropdownProps } from '../../utils/dexterityTypes';
 
-export const FundingTrader: FC = () => {
+export const SelectTraderAccounts: FC = () => {
     const { publicKey } = useWallet();
     const { manifest } = useManifest();
-    const { trader } = useTrader();
-    const { selectedProduct } = useProduct()
-    const [amount, setAmount] = useState<number | null>(null);
-    const [isLoading, setIsLoading] = useState(false);
-    const [depositStatus, setDepositStatus] = useState<'idle' | 'processing' | 'success' | 'failed'>('idle');
-    const [withdrawStatus, setWithdrawStatus] = useState<'idle' | 'processing' | 'success' | 'failed'>('idle');
+    const [trgsArr, setTrgsArr] = useState<TraderAccount[]>([]);
+    const [selectedTrg, setSelectedTrg] = useState<string>('');
+    const { setTrader } = useTrader()
+    const { mpgPubkey } = useProduct()
 
-    const handleDeposit = useCallback(async () => {
-        if (!amount || !publicKey || !manifest) return;
+    useEffect(() => {
+        fetchTraderAccounts();
+    }, [publicKey, manifest]);
+
+    const fetchTraderAccounts = useCallback(async () => {
+        if (!publicKey) {console.log('publicKey error');return};
+        if (!manifest) {console.log('manifest error');return};
+        if (!manifest.fields) {console.log('manifest.fields error');return};
+        if (!manifest.fields.wallet.publicKey) {console.log('manifest.fields.wallet.publicKey error');return};
+
         try {
 
-          // Deposit
+            // TRG Fetching
+            const owner = publicKey
+				const marketProductGroup = new PublicKey(mpgPubkey)
+				const trgs = await manifest.getTRGsOfOwner(owner, marketProductGroup)
+				setTrgsArr(trgs)
 
         } catch (error: any) {
-            setDepositStatus('failed');
-            notify({ type: 'error', message: 'Deposit failed!', description: error?.message });
-        } finally {
-            setIsLoading(false);
+            notify({ type: 'error', message: `Selecting Trader Account failed!`, description: error?.message });
         }
-    }, [amount, publicKey, manifest, trader, selectedProduct]);
 
-    const handleWithdraw = useCallback(async () => {
-        if (!amount || !publicKey || !manifest) return;
+    }, [publicKey, manifest]);
+
+    const handleCreateTRG = useCallback(async () => {
         try {
 
-          // Withdraw
+            // TRG Creation
+            const marketProductGroup = new PublicKey(mpgPubkey)
+				await manifest.createTrg(marketProductGroup)
+            fetchTraderAccounts();
 
         } catch (error: any) {
-            setWithdrawStatus('failed');
-            notify({ type: 'error', message: 'Withdrawal failed!', description: error?.message });
-        } finally {
-            setIsLoading(false);
+            notify({ type: 'error', message: `Creating Trader Account failed!`, description: error?.message });
         }
+    }, [fetchTraderAccounts, manifest]);
 
-    }, [amount, publicKey, manifest, trader, selectedProduct]);
+    const handleSelection = useCallback(async (selectedValue: string) => {
+
+            // TRG Selection & Initiation
+            const trgPubkey = new PublicKey(selectedTrgPubkey)
+            const trader = new dexterity.Trader(manifest, trgPubkey)
+
+				await trader.update()
+
+				const marketProductGroup = new PublicKey(mpgPubkey)
+				await manifest.updateOrderbooks(marketProductGroup)
+
+			setTrader(trader)
+
+    }, [manifest, setTrader]);
 
     return (
-        <div className="flex flex-col justify-center items-center border border-white rounded-lg p-4 mt-4">
-          <h1 className='text-2xl mb-4'>Funding Trader Account</h1>
-        
-          <div className="w-full flex flex-col items-center mt-20 mb-6">
-            <label htmlFor="amountInput" className="text-xl font-semibold mb-1">Amount</label>
-            <input
-              id="amountInput"
-              type="number"
-              placeholder="Amount"
-              onChange={(e) => setAmount(parseFloat(e.target.value))}
-              className="w-full p-2 rounded-md text-xl text-black border border-gray-300"
-              aria-label="Enter the amount for deposit or withdraw"
-            />
-          </div>
-      
-          <div className="flex justify-center space-x-4 w-full mt-12">
-            <button
-              onClick={handleDeposit}
-              className={`group text-md w-30 m-2 btn ${amount !== null ? 'bg-gradient-to-br  from-[#80ff7d] to-[#80ff7d] hover:from-white hover:to-purple-300 text-black' : 'bg-gray-300 cursor-not-allowed'}`}
-              disabled={amount === null || isLoading}
-            >
-              {isLoading && depositStatus === 'processing' ? 'Processing...' : depositStatus === 'success' ? 'Success!' : depositStatus === 'failed' ? 'Failed!' : '🏦 Deposit'}
-            </button>
-            
-            <button
-              onClick={handleWithdraw}
-              className={`group text-md w-30 m-2 btn ${amount !== null ? 'bg-gradient-to-br from-[#ff80f2] to-[#ff80f2] hover:from-white hover:to-purple-300 text-black' : 'bg-gray-300 cursor-not-allowed'}`}
-              disabled={amount === null || isLoading}
-            >
-              {isLoading && withdrawStatus === 'processing' ? 'Processing...' : withdrawStatus === 'success' ? 'Success!' : withdrawStatus === 'failed' ? 'Failed!' : '💸 Withdraw'}
-            </button>
-          </div>
+        <div className="flex flex-col items-center justify-center border border-white rounded-lg p-4 mt-4">
+            <h1 className="text-2xl mb-4">Select or Create a Trader Account</h1>
+    
+            {trgsArr.length > 0 ? (
+                <div className="w-full flex flex-col items-center space-y-4">
+                    <div><TraderAccountDropdown accounts={trgsArr} onSelect={handleSelection} />
+                    <span className='ml-5 cursor-pointer' onClick={() => {handleCopy(selectedTrg, 'Trg Pubkey')}}>📋</span></div>
+                    <Button
+                        text="🔄 Load Trader Accounts"
+                        onClick={fetchTraderAccounts}
+                        disabled={!publicKey}
+                        className={`w-full text-md rounded-md ${publicKey ? 'bg-gradient-to-br from-[#80ff7d] to-[#80ff7d] hover:from-white hover:to-purple-300 text-black' : 'bg-gray-300 cursor-not-allowed'}`}
+                    />
+                </div>
+            ) : (
+                <div className="w-full flex flex-col items-center space-y-4">
+                    <Button
+                        text="🔄 Load Trader Accounts"
+                        onClick={fetchTraderAccounts}
+                        disabled={!publicKey}
+                        className={`w-full text-md rounded-md ${publicKey ? 'bg-gradient-to-br from-[#80ff7d] to-[#80ff7d] hover:from-white hover:to-purple-300 text-black' : 'bg-gray-300 cursor-not-allowed'}`}
+                    />
+                    <Button
+                        text="➕ Create New Trader Account"
+                        onClick={handleCreateTRG}
+                        disabled={!publicKey}
+                        className={`w-full text-md rounded-md ${publicKey ? 'bg-gradient-to-br from-[#80ff7d] to-[#80ff7d] hover:from-white hover:to-purple-300 text-black' : 'bg-gray-300 cursor-not-allowed'}`}
+                    />
+                </div>
+            )}
         </div>
-      );
-      
+    );
+};
+
+const TraderAccountDropdown: FC<TraderAccountDropdownProps> = ({ accounts, onSelect }) => {
+    return (
+        <select onChange={(e) => onSelect(e.target.value)} className='text-black text-xl'>
+            <option value="default">Select a Trader Account</option>
+            {accounts.map((trg, index) => (
+                <option key={index} value={trg.pubkey.toBase58()}>{formatPubKey(trg.pubkey.toBase58())}</option>
+            ))}
+        </select>
+    );
 };
